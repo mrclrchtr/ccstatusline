@@ -28,6 +28,11 @@ bun run build   # Creates dist/ccstatusline.js with Node.js 14+ compatibility
 
 # Lint and type check
 bun run lint   # Runs TypeScript type checking and ESLint with auto-fix
+
+# Test runner script
+./test-runner.sh main                           # TUI mode
+./test-runner.sh main '{"model":{"display_name":"Claude 3.5 Sonnet"}}' # Piped mode
+./test-runner.sh file src/utils/colors.ts       # Run specific file
 ```
 
 ## Architecture
