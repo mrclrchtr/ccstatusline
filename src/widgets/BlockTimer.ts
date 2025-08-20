@@ -8,6 +8,8 @@ import type {
 } from '../types/Widget';
 
 type DisplayMode = 'time' | 'progress' | 'progress-short';
+type BlockStyle = '█' | '■' | '▪';
+type PrefixStyle = 'block' | 'timer' | 'none';
 
 export class BlockTimerWidget implements Widget {
     getDefaultColor(): string { return 'yellow'; }
@@ -16,12 +18,24 @@ export class BlockTimerWidget implements Widget {
 
     getEditorDisplay(item: WidgetItem): WidgetEditorDisplay {
         const mode = item.metadata?.display ?? 'time';
+        const blockStyle = item.metadata?.blockStyle ?? '█';
+        const prefixStyle = item.metadata?.prefixStyle ?? 'block';
         const modifiers: string[] = [];
 
         if (mode === 'progress') {
             modifiers.push('progress bar');
         } else if (mode === 'progress-short') {
             modifiers.push('short bar');
+        }
+
+        if (blockStyle !== '█') {
+            modifiers.push(`${blockStyle} style`);
+        }
+
+        if (prefixStyle === 'timer') {
+            modifiers.push('timer prefix');
+        } else if (prefixStyle === 'none') {
+            modifiers.push('no prefix');
         }
 
         return {
@@ -50,33 +64,94 @@ export class BlockTimerWidget implements Widget {
                     display: nextMode
                 }
             };
+        } else if (action === 'toggle-block-style') {
+            const currentStyle = (item.metadata?.blockStyle ?? '█') as BlockStyle;
+            let nextStyle: BlockStyle;
+
+            if (currentStyle === '█') {
+                nextStyle = '■';
+            } else if (currentStyle === '■') {
+                nextStyle = '▪';
+            } else {
+                nextStyle = '█';
+            }
+
+            return {
+                ...item,
+                metadata: {
+                    ...item.metadata,
+                    blockStyle: nextStyle
+                }
+            };
+        } else if (action === 'toggle-prefix') {
+            const currentPrefix = (item.metadata?.prefixStyle ?? 'block') as PrefixStyle;
+            let nextPrefix: PrefixStyle;
+
+            if (currentPrefix === 'block') {
+                nextPrefix = 'timer';
+            } else if (currentPrefix === 'timer') {
+                nextPrefix = 'none';
+            } else {
+                nextPrefix = 'block';
+            }
+
+            return {
+                ...item,
+                metadata: {
+                    ...item.metadata,
+                    prefixStyle: nextPrefix
+                }
+            };
         }
         return null;
     }
 
     render(item: WidgetItem, context: RenderContext, settings: Settings): string | null {
         const displayMode = (item.metadata?.display ?? 'time') as DisplayMode;
+        const blockStyle = (item.metadata?.blockStyle ?? '█') as BlockStyle;
+        const prefixStyle = (item.metadata?.prefixStyle ?? 'block') as PrefixStyle;
 
         if (context.isPreview) {
-            const prefix = item.rawValue ? '' : 'Block ';
-            if (displayMode === 'progress') {
-                return `${prefix}[██████████████████████░░░░░░░░] 73.9%`;
-            } else if (displayMode === 'progress-short') {
-                return `${prefix}[███████░░░░░░░░] 73.9%`;
+            let prefix = '';
+            if (!item.rawValue) {
+                if (prefixStyle === 'block') {
+                    prefix = displayMode === 'time' ? 'Block: ' : 'Block ';
+                } else if (prefixStyle === 'timer') {
+                    prefix = '⏱️ 1h 15m→ ';
+                }
             }
-            return item.rawValue ? '3hr 45m' : 'Block: 3hr 45m';
+
+            if (displayMode === 'progress') {
+                const filled = blockStyle.repeat(22);
+                const empty = blockStyle === '█' ? '░'.repeat(10) : ' '.repeat(10);
+                return `${prefix}[${filled}${empty}] 73.9%`;
+            } else if (displayMode === 'progress-short') {
+                const filled = blockStyle.repeat(11);
+                const empty = blockStyle === '█' ? '░'.repeat(5) : ' '.repeat(5);
+                return `${prefix}[${filled}${empty}] 73.9%`;
+            }
+            return `${prefix}3hr 45m`;
         }
 
         // Check if we have block metrics in context
         const blockMetrics = context.blockMetrics;
         if (!blockMetrics) {
             // No active session - show empty progress bar or 0hr 0m
+            let prefix = '';
+            if (!item.rawValue) {
+                if (prefixStyle === 'block') {
+                    prefix = displayMode === 'time' ? 'Block: ' : 'Block ';
+                } else if (prefixStyle === 'timer') {
+                    prefix = '⏱️ 5h 0m→ ';
+                }
+            }
+
             if (displayMode === 'progress' || displayMode === 'progress-short') {
                 const barWidth = displayMode === 'progress' ? 32 : 16;
-                const emptyBar = '░'.repeat(barWidth);
-                return item.rawValue ? `[${emptyBar}] 0%` : `Block [${emptyBar}] 0%`;
+                const emptyBar = blockStyle === '█' ? '░'.repeat(barWidth) : ' '.repeat(barWidth);
+                return `${prefix}[${emptyBar}] 0%`;
             } else {
-                return item.rawValue ? '0hr 0m' : 'Block: 0hr 0m';
+                return `${prefix}0hr 0m`;
             }
         }
 
@@ -88,30 +163,45 @@ export class BlockTimerWidget implements Widget {
             const progress = Math.min(elapsedMs / sessionDurationMs, 1.0);
             const percentage = (progress * 100).toFixed(1);
 
+            // Calculate elapsed and remaining time
+            const elapsedHours = Math.floor(elapsedMs / (1000 * 60 * 60));
+            const elapsedMinutes = Math.floor((elapsedMs % (1000 * 60 * 60)) / (1000 * 60));
+            const remainingMs = Math.max(sessionDurationMs - elapsedMs, 0);
+            const remainingHours = Math.floor(remainingMs / (1000 * 60 * 60));
+            const remainingMinutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+
+            // Build prefix
+            let prefix = '';
+            if (!item.rawValue) {
+                if (prefixStyle === 'block') {
+                    prefix = displayMode === 'time' ? 'Block: ' : 'Block ';
+                } else if (prefixStyle === 'timer') {
+                    let remainingString: string;
+                    if (remainingMinutes === 0) {
+                        remainingString = `${remainingHours}h`;
+                    } else {
+                        remainingString = `${remainingHours}h ${remainingMinutes}m`;
+                    }
+                    prefix = `⏱️ ${remainingString}→ `;
+                }
+            }
+
             if (displayMode === 'progress' || displayMode === 'progress-short') {
                 const barWidth = displayMode === 'progress' ? 32 : 16;
                 const filledWidth = Math.floor(progress * barWidth);
                 const emptyWidth = barWidth - filledWidth;
-                const progressBar = '█'.repeat(filledWidth) + '░'.repeat(emptyWidth);
-
-                if (item.rawValue) {
-                    return `[${progressBar}] ${percentage}%`;
-                } else {
-                    return `Block [${progressBar}] ${percentage}%`;
-                }
+                const emptyChar = blockStyle === '█' ? '░' : ' ';
+                const progressBar = blockStyle.repeat(filledWidth) + emptyChar.repeat(emptyWidth);
+                return `${prefix}[${progressBar}] ${percentage}%`;
             } else {
                 // Time display mode
-                const elapsedHours = Math.floor(elapsedMs / (1000 * 60 * 60));
-                const elapsedMinutes = Math.floor((elapsedMs % (1000 * 60 * 60)) / (1000 * 60));
-
                 let timeString: string;
                 if (elapsedMinutes === 0) {
                     timeString = `${elapsedHours}hr`;
                 } else {
                     timeString = `${elapsedHours}hr ${elapsedMinutes}m`;
                 }
-
-                return item.rawValue ? timeString : `Block: ${timeString}`;
+                return `${prefix}${timeString}`;
             }
         } catch {
             return null;
@@ -120,7 +210,9 @@ export class BlockTimerWidget implements Widget {
 
     getCustomKeybinds(): CustomKeybind[] {
         return [
-            { key: 'p', label: '(p)rogress toggle', action: 'toggle-progress' }
+            { key: 'p', label: '(p)rogress toggle', action: 'toggle-progress' },
+            { key: 'b', label: '(b)lock style', action: 'toggle-block-style' },
+            { key: 'l', label: 'prefix (l)abel', action: 'toggle-prefix' }
         ];
     }
 
